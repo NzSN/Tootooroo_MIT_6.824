@@ -123,8 +123,15 @@ func RetrieveTask() TaskReqReply {
 	return reply
 }
 
-func MapTaskDone(taskid string files []string) {
+func MapTaskDone(taskid string, files []string) {
+	args := TaskDoneArgs{}
+	args.Task_id = taskid
+	args.Task_type = map_task
+	args.Content = files
 
+	reply := TaskDoneReply{}
+
+	call("Master.TaskDone", &args, &reply)
 }
 
 func ReduceTaskDone(taskid string) {
