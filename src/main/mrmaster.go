@@ -9,10 +9,13 @@ package main
 // Please do not change this file.
 //
 
-import "../mr"
-import "time"
-import "os"
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"../mr"
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -21,6 +24,10 @@ func main() {
 	}
 
 	m := mr.MakeMaster(os.Args[1:], 10)
+	if m == nil {
+		return
+	}
+
 	for m.Done() == false {
 		time.Sleep(time.Second)
 	}
