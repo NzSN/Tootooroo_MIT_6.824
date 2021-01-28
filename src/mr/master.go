@@ -10,18 +10,26 @@ import (
 )
 
 const (
-	idle          = 0
-	in_processing = 1
-	complete      = 2
+	idle        = 0
+	in_progress = 1
+	complete    = 2
 )
+
+type MapTask struct {
+	path string
+	stat int
+}
+
+type ReduceTask struct {
+	task_id string
+	path    string
+	stat    int
+}
 
 type Master struct {
 	// Your definitions here.
 	tasks   map[string]int
-	reduces map[string]struct {
-		path string
-		stat int
-	}
+	reduces map[string]*ReduceTask
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -29,6 +37,10 @@ func (m *Master) TaskReq(args *TaskReqArgs, reply *TaskReqReply) error {
 	// Try assign an map task to worker if exists.
 	for k, v := range m.tasks {
 		if v == idle {
+			// Mark task as in_progress
+			m.tasks[k] = in_progress
+
+			// Reply
 			reply.Task_type = map_task
 			reply.Task_id = k
 			reply.Content = k
@@ -37,10 +49,14 @@ func (m *Master) TaskReq(args *TaskReqArgs, reply *TaskReqReply) error {
 	}
 
 	// No map task found then try to assing an reduce task.
-	for k, v := range m.reduces {
+	for _, v := range m.reduces {
 		if v.stat == idle {
+			// Mark task as in_progress
+			v.stat = in_progress
+
+			// Reply
 			reply.Task_type = reduce_task
-			reply.Task_id = k
+			reply.Task_id = v.task_id
 			reply.Content = v.path
 			return nil
 		}
@@ -49,6 +65,21 @@ func (m *Master) TaskReq(args *TaskReqArgs, reply *TaskReqReply) error {
 	// No available task to assign
 	reply.Task_type = none
 	reply.Content = " "
+	return nil
+}
+
+func (m *Master) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
+
+	if args.Task_type == map_task {
+		// Record into Master.reduces
+		for _, file := range args.Content {
+			m.tasks[args.Task_id] = complete
+			m.reduces[file] = &ReduceTask{args.Task_id, file, idle}
+		}
+	} else if args.Task_type == reduce_task {
+		m.reduces[args.Task_id].stat = complete
+	}
+
 	return nil
 }
 
@@ -83,9 +114,23 @@ func (m *Master) server() {
 // if the entire job has finished.
 //
 func (m *Master) Done() bool {
-	ret := false
+	ret := true
 
 	// Your code here.
+
+	// If all Map tasks and Reduce tasks is complete
+	// then we think the mission is done.
+	for _, v := range m.tasks {
+		if v != complete {
+			return false
+		}
+	}
+
+	for _, v := range m.reduces {
+		if v.stat != complete {
+			return false
+		}
+	}
 
 	return ret
 }
@@ -98,10 +143,7 @@ func (m *Master) Done() bool {
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{
 		make(map[string]int),
-		make(map[string]struct {
-			path string
-			stat int
-		}),
+		make(map[string]*ReduceTask),
 	}
 
 	// Your code here.

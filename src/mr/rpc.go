@@ -42,6 +42,9 @@ type TaskReqReply struct {
 }
 
 type TaskDoneArgs struct {
+	// Identifier of task, able to get
+	// task from Master.tasks or Master.reduces
+	// by index with value of this field.
 	Task_id   string
 	Task_type int
 	Content   []string

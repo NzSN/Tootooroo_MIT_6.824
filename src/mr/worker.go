@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"bufio"
 	"fmt"
 	"hash/fnv"
 	"io/ioutil"
@@ -8,6 +9,8 @@ import (
 	"net/rpc"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 )
 
 //
@@ -35,17 +38,23 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	reply := RetrieveTask()
-	fileName := reply.Content
 
-	switch reply.Task_type {
-	case map_task:
-		outputfile := fileName + "_output"
-		files := doMapTask(mapf, fileName, outputfile)
-		MapTaskDone(reply.Task_id, files)
-	case reduce_task:
-		doReduceTask(reducef, fileName, "123")
-		ReduceTaskDone(reply.Task_id)
+	for {
+		reply := RetrieveTask()
+		fileName := reply.Content
+
+		switch reply.Task_type {
+		case map_task:
+			outputfile := fileName + "_partition"
+			files := doMapTask(mapf, fileName, outputfile)
+			MapTaskDone(reply.Task_id, files)
+		case reduce_task:
+			outputfile := fileName + "_output"
+			doReduceTask(reducef, fileName, outputfile)
+			ReduceTaskDone(fileName)
+		}
+
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -82,12 +91,12 @@ func DoPartition(kva []KeyValue, num int) [][]KeyValue {
 // Store partition onto disk and return filename of files
 func PartitionStore(pars [][]KeyValue, filename string) []string {
 
-	outputfiles = []string
+	outputfiles := []string{}
 	length := len(pars)
 
 	for i := 0; i < length; i++ {
 		// Creaet file
-		outputfile := filename + strconv.Itoa(i)
+		outputfile := filename + "_" + strconv.Itoa(i)
 		outputfiles = append(outputfiles, outputfile)
 
 		f, err := os.Create(outputfile)
@@ -110,6 +119,44 @@ func doReduceTask(reducef func(string, []string) string,
 	filePath string,
 	outputfile string) {
 
+	datas := map[string][]string{}
+	output := map[string]string{}
+
+	// Read intermediate key-value pairs
+	f, _ := os.OpenFile(filePath, os.O_RDONLY, os.ModeAppend)
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		raw := scanner.Text()
+		kv := strings.Split(raw, " ")
+
+		key, val := kv[0], kv[1]
+
+		if _, ok := datas[key]; ok {
+			// Exists
+			datas[key] = append(datas[key], val)
+		} else {
+			datas[key] = []string{val}
+		}
+	}
+
+	// Reduce intermediate key-value pairs
+	for k, vals := range datas {
+		r_val := reducef(k, vals)
+		output[k] = r_val
+	}
+
+	// Store datas into output file
+	f, err := os.OpenFile(outputfile, os.O_WRONLY|os.O_CREATE, os.ModeAppend)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	for k, v := range output {
+		f.Write([]byte(k + " " + v + "\n"))
+	}
+
+	f.Sync()
 }
 
 func RetrieveTask() TaskReqReply {
@@ -135,9 +182,15 @@ func MapTaskDone(taskid string, files []string) {
 }
 
 func ReduceTaskDone(taskid string) {
+	args := TaskDoneArgs{}
+	args.Task_id = taskid
+	args.Task_type = reduce_task
+	args.Content = []string{}
 
+	reply := TaskDoneReply{}
+
+	call("Master.TaskDone", &args, &reply)
 }
-
 
 //
 // example function to show how to make an RPC call to the master.
